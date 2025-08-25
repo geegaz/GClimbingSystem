@@ -1,497 +1,497 @@
-﻿
-using System;
+﻿using System;
 using UdonSharp;
 using UnityEngine;
+using UnityEngine.Serialization;
 using VRC.SDKBase;
 using VRC.Udon;
 using VRC.Udon.Common;
 
-[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
-public class GClimbingSystem : UdonSharpBehaviour
-{  
-    [SerializeField] private Transform HandTransform;
-    [SerializeField] private LayerMask climableMask;
-    [SerializeField] private Material climbingHighlightMaterial;
-
-    [Header("Walljump")]
-    [Space]
-    [SerializeField] private bool walljumpEnabled = true;
-    [SerializeField] private float walljumpSpeed = 5f;
-
-    [Header("Climbing")]
-    [Space]
-    [Tooltip("Sets the player's gravity strength to 0 while climbing, helps prevent jittering")]
-    [SerializeField] private bool overrideGravity = true;
-    [Tooltip("Makes an average of the previous velocities to fake the conservation of force when letting go")]
-    [SerializeField] private bool velocityBufferEnabled = true;
-    [Tooltip("Teleports the player at the grabbing point if the grabbed surface is facing up and there's enough space around")]
-    [SerializeField] private bool ledgeHelpEnabled = true;
-    [SerializeField] private LayerMask ledgeHelpeMask;
-    [SerializeField] private float ledgeHelpMaxAngle = 35f;
-    [SerializeField] private float ledgeHelpCapsuleHeight = 2f;
-    [SerializeField] private float ledgeHelpCapsuleRadius = 0.1f;
-    [SerializeField] private float ledgeHelpCapsuleMargin = 0.01f;
-
-    [Header("VR Settings")]
-    [Tooltip("Use the grip buttons instead of the triggers to climb")]
-    [SerializeField] private bool useGripButtons = true;
-    [SerializeField] private float handRadius = 0.1f;
-    [SerializeField] private float maxFlingSpeed = 6f;
-    [SerializeField] private float flingSpeedMultiplier = 1.2f;
-
-    [Header("Desktop Settings")]
-    [SerializeField] private float headReach = 2f;
-    [SerializeField] private float headDistance = 0.5f;
-    [SerializeField] private float headMoveSpeed = 5f;
-
-    [Header("Events")]
-    [SerializeField] private bool _sendEventsToClimbedObjects = true;
-    [SerializeField] private UdonBehaviour[] _eventTargets;
-    [SerializeField] private string _grabbedEvent = "ClimbingGrabbed";
-    [SerializeField] private string _droppedEvent = "ClimbingDropped";
-
-    // Desktop-specific
-    private Vector3 _lastHeadDir;
-    private float _lastHeadDistance;
-
-    // Climbing & velocity
-    private Vector3 _lastClimbedVelocity;
-    private Vector3 _lastTransformPosition;
-    private Vector3 _lastTransformVelocity;
-    private Transform _lastClimbedTransform;
-
-    private Collider[] grabSurfaces = new Collider[1];
-    private Vector3[] _velocityBuffer = new Vector3[5];
-
-    [NonSerialized] public bool climbing = false;
-    [NonSerialized] public HandType climbingHand;
-    
-    // Cache local player and VR status
-    [NonSerialized] public VRCPlayerApi localPlayer;
-    [NonSerialized] public bool inVR;
-
-    private bool _holdingMouseLeft;
-
-    private float _leftHandHighlight = 0f;
-    private float _rightHandHighlight = 0f;
-    
-
-    #region Events
-
-    private void Start()
+namespace VRC_GClimbing
+{
+    [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
+    public class GClimbingSystem : UdonSharpBehaviour
     {
-        localPlayer = Networking.LocalPlayer;
-        if (localPlayer != null) 
-            inVR = localPlayer.IsUserInVR();
-        if (HandTransform) 
-            HandTransform.localScale = Vector3.one * handRadius;
-    }
+        [SerializeField] private Transform handTransform;
+        [SerializeField] private LayerMask climableMask;
+        [SerializeField] private Material climbingHighlightMaterial;
 
-    private void Update() 
-    {
-        if (climbingHighlightMaterial) 
+        [Header("Walljump")] [Space] 
+        [SerializeField] private bool wallJumpEnabled = true;
+        [SerializeField] private float wallJumpSpeed = 5f;
+
+        [Header("Climbing")] [Space]
+        [Tooltip("Sets the player's gravity strength to 0 while climbing, helps prevent jittering")]
+        [SerializeField] private bool overrideGravity = true;
+
+        [Tooltip("Makes an average of the previous velocities to fake the conservation of force when letting go")]
+        [SerializeField] private bool velocityBufferEnabled = true;
+
+        [Tooltip("Teleports the player at the grabbing point if the grabbed surface is facing up and there's enough space around")]
+        [SerializeField] private bool ledgeHelpEnabled = true;
+        [SerializeField] private LayerMask ledgeHelpMask;
+        [SerializeField] private float ledgeHelpMaxAngle = 35f;
+        [SerializeField] private float ledgeHelpCapsuleHeight = 2f;
+        [SerializeField] private float ledgeHelpCapsuleRadius = 0.1f;
+        [SerializeField] private float ledgeHelpCapsuleMargin = 0.01f;
+
+        [Header("VR Settings")] 
+        [Tooltip("Use the grip buttons instead of the triggers to climb")]
+        [SerializeField] private bool useGripButtons = true;
+        [SerializeField] private float handRadius = 0.1f;
+        [SerializeField] private float maxFlingSpeed = 6f;
+        [SerializeField] private float flingSpeedMultiplier = 1.2f;
+
+        [Header("Desktop Settings")] 
+        [SerializeField] private float headReach = 2f;
+        [SerializeField] private float headDistance = 0.5f;
+        [SerializeField] private float headMoveSpeed = 5f;
+
+        [Header("Events")] 
+        [SerializeField] private bool sendEventsToClimbedObjects = true;
+        [SerializeField] private UdonBehaviour[] eventTargets;
+        [SerializeField] private string grabbedEventName = "ClimbingGrabbed";
+        [SerializeField] private string droppedEventName = "ClimbingDropped";
+
+        private readonly Collider[] _grabSurfaces = new Collider[1];
+        private readonly Vector3[] _velocityBuffer = new Vector3[5];
+
+        private bool _holdingMouseLeft;
+        private Transform _lastClimbedTransform;
+
+        // Climbing & velocity
+        private Vector3 _lastClimbedVelocity;
+
+        // Desktop-specific
+        private Vector3 _lastHeadDir;
+        private float _lastHeadDistance;
+        private Vector3 _lastTransformPosition;
+        private Vector3 _lastTransformVelocity;
+
+        private float _leftHandHighlight;
+        private float _rightHandHighlight;
+
+        [NonSerialized] public bool Climbing;
+        [NonSerialized] public HandType ClimbingHand;
+        [NonSerialized] public bool InVR;
+
+        // Cache local player and VR status
+        [NonSerialized] public VRCPlayerApi LocalPlayer;
+
+
+        #region Events
+
+        private void Start()
         {
-            UpdateMaterial();
+            LocalPlayer = Networking.LocalPlayer;
+            if (LocalPlayer != null)
+                InVR = LocalPlayer.IsUserInVR();
+            if (handTransform)
+                handTransform.localScale = Vector3.one * handRadius;
         }
-    }
 
-    public override void PostLateUpdate()
-    {
-        if (climbing) 
+        private void Update()
         {
-            UpdateGrab(climbingHand);
+            if (climbingHighlightMaterial) UpdateMaterial();
         }
-    }
 
-    #endregion
-
-    #region Inputs
-
-    public override void InputJump(bool value, UdonInputEventArgs args)
-    {
-        if (value && walljumpEnabled && climbing) 
+        public override void PostLateUpdate()
         {
-            // Let go with jump force
-            DropWithBoost(Vector3.up * walljumpSpeed);
+            if (Climbing) UpdateGrab(ClimbingHand);
         }
-    }
 
-    public override void InputUse(bool value, UdonInputEventArgs args)
-    {
-        if (inVR) 
-        {
-            if (useGripButtons) return; // Skip execution
-            ProcessInput(value, args.handType);
-        }
-        else 
-        {
-            // The Use input is always Left Click on Desktop
-            ProcessInput(value, HandType.LEFT);
-        }
-    }
+        #endregion
 
-    public override void InputGrab(bool value, UdonInputEventArgs args)
-    {
-        if (inVR) 
-        {
-            if (!useGripButtons) return; // Skip execution
-            ProcessInput(value, args.handType);
-        }
-    }
+        #region Inputs
 
-    public override void InputDrop(bool value, UdonInputEventArgs args)
-    {
-        if (inVR) 
+        public override void InputJump(bool value, UdonInputEventArgs args)
         {
-            Debug.LogError("Climbing system detected InputDrop event in VR - this is not handled");
-            return; // Not handled - skip execution
+            if (value && wallJumpEnabled && Climbing)
+                // Let go with jump force
+                DropWithBoost(Vector3.up * wallJumpSpeed);
         }
-        else 
-        {
-            // The Drop input is always Right Click on PC
-            ProcessInput(value, HandType.RIGHT);
-        }
-    }
 
-
-    private void ProcessInput(bool value, HandType hand) 
-    {
-        if (inVR) 
+        public override void InputUse(bool value, UdonInputEventArgs args)
         {
-            if (value && !IsClimbingWithHand(hand) && TestGrabVR(hand)) 
+            if (InVR)
             {
-                Grab(hand);
+                if (useGripButtons) return; // Skip execution
+                ProcessInput(value, args.handType);
             }
-            if (!value && IsClimbingWithHand(hand))
+            else
             {
-                if (ledgeHelpEnabled && TestLedgeHelp(out Vector3 pos))
-                    DropWithTeleport(pos);
-                else
-                    Drop();
+                // The Use input is always Left Click on Desktop
+                ProcessInput(value, HandType.LEFT);
             }
         }
-        else // Desktop
+
+        public override void InputGrab(bool value, UdonInputEventArgs args)
         {
-            // HandType is used to identify click
-            if (hand == HandType.LEFT) 
+            if (InVR)
             {
-                if (value && TestGrabDesktop()) 
+                if (!useGripButtons) return; // Skip execution
+                ProcessInput(value, args.handType);
+            }
+        }
+
+        public override void InputDrop(bool value, UdonInputEventArgs args)
+        {
+            if (InVR)
+                Debug.LogError("Climbing system detected InputDrop event in VR - this is not handled");
+            else
+                // The Drop input is always Right Click on PC
+                ProcessInput(value, HandType.RIGHT);
+        }
+
+
+        private void ProcessInput(bool value, HandType hand)
+        {
+            if (InVR)
+            {
+                if (value && !IsClimbingWithHand(hand) && TestGrabVR(hand)) Grab(hand);
+                if (!value && IsClimbingWithHand(hand))
                 {
-                    _holdingMouseLeft = true; // Don't change the head distance
-                    Grab(HandType.RIGHT); // Use the right hand by default
+                    if (ledgeHelpEnabled && TestLedgeHelp(out var pos))
+                        DropWithTeleport(pos);
+                    else
+                        Drop();
                 }
-                else 
+            }
+            else // Desktop
+            {
+                // HandType is used to identify click
+                if (hand == HandType.LEFT)
                 {
-                    _holdingMouseLeft = false;
-                    if (climbing) 
+                    if (value && TestGrabDesktop())
                     {
-                        if (localPlayer.IsPlayerGrounded())
-                            Drop(true);
-                        else if (ledgeHelpEnabled && TestLedgeHelp(out Vector3 pos))
-                            DropWithTeleport(pos);
+                        _holdingMouseLeft = true; // Don't change the head distance
+                        Grab(HandType.RIGHT); // Use the right hand by default
+                    }
+                    else
+                    {
+                        _holdingMouseLeft = false;
+                        if (Climbing)
+                        {
+                            if (LocalPlayer.IsPlayerGrounded())
+                                Drop(true);
+                            else if (ledgeHelpEnabled && TestLedgeHelp(out var pos))
+                                DropWithTeleport(pos);
+                        }
                     }
                 }
-            }
-            else if (!value && climbing && !HasPickupInHand(VRC_Pickup.PickupHand.Right))
-                Drop(); // Drop on right click if the player doesn't have a pickup
-        }
-    }
-
-    #endregion
-
-    #region Climbing
-
-    private void UpdateMaterial() 
-    {
-        if (inVR) 
-        {
-            // Update from tracked hand position
-            GetHandPos(HandType.RIGHT, out Vector3 rightHandPos);
-            GetHandPos(HandType.LEFT, out Vector3 leftHandPos);
-
-            _rightHandHighlight = Mathf.Lerp(_rightHandHighlight, climbing && climbingHand == HandType.RIGHT ? 0f : 0.5f, 0.2f);
-            _leftHandHighlight = Mathf.Lerp(_leftHandHighlight, climbing && climbingHand == HandType.LEFT ? 0f : 0.5f, 0.2f);
-
-            climbingHighlightMaterial.SetFloat("_RightHandDist", climbing && climbingHand == HandType.RIGHT ? 0f : handRadius);
-            climbingHighlightMaterial.SetFloat("_LeftHandDist", climbing && climbingHand == HandType.LEFT ? 0f : handRadius);
-            climbingHighlightMaterial.SetVector("_RightHandPosition", new Vector4(rightHandPos.x, rightHandPos.y, rightHandPos.z, _rightHandHighlight));
-            climbingHighlightMaterial.SetVector("_LeftHandPosition", new Vector4(leftHandPos.x, leftHandPos.y, leftHandPos.z, _leftHandHighlight));
-        }
-        else 
-        {
-            // Update from raycast
-            GetHeadPos(out Vector3 headPos, out Vector3 headDir);
-
-            Vector3 targetPos;
-            if (Physics.Raycast(headPos, headDir, out RaycastHit hit, headReach, climableMask, QueryTriggerInteraction.Collide)) 
-            {
-                targetPos = hit.point;
-                climbingHighlightMaterial.SetFloat("_RightHandDist", climbing && _holdingMouseLeft ? 0f : handRadius);
-            }
-            else 
-            {
-                targetPos = headPos + headDir * headReach;
-                climbingHighlightMaterial.SetFloat("_RightHandDist", 0f);
-            }
-            _rightHandHighlight = Mathf.Lerp(_rightHandHighlight, climbing && _holdingMouseLeft ? 0f : 0.5f, 0.2f);
-            climbingHighlightMaterial.SetVector("_RightHandPosition", new Vector4(targetPos.x, targetPos.y, targetPos.z, _rightHandHighlight));
-        }
-    }
-
-    private void UpdateGrab(HandType hand) 
-    {
-        Vector3 climbingPos;
-        if (inVR) 
-        {
-            GetHandPos(hand, out climbingPos);
-        }
-        else 
-        {
-            GetHeadPos(out Vector3 headPos, out Vector3 headDir);
-            
-            if (_holdingMouseLeft) // Update head offset based on mouse direction while left button is pressed
-                _lastHeadDir = headDir;
-            if (_lastHeadDistance > headDistance) // Smoothly move to the target position
-                _lastHeadDistance = Mathf.MoveTowards(_lastHeadDistance, headDistance, headMoveSpeed * Time.deltaTime);
-            
-            climbingPos = (headPos + _lastHeadDir * _lastHeadDistance);
-        }
-
-        // Calculate climbing velocity (total velocity to reach the grabbing point)
-        Vector3 climbingOffset = HandTransform.position - climbingPos;
-        _lastClimbedVelocity = climbingOffset * (1.0f / Time.deltaTime);
-
-        // Calculate transform velocity (velocity of the object we're grabbing on)
-        Vector3 transformOffset = HandTransform.position - _lastTransformPosition;
-        _lastTransformVelocity = transformOffset * (1.0f / Time.deltaTime);
-        _lastTransformPosition = HandTransform.position;
-
-        // Store velocity in buffer for smoothing on drop
-        if (velocityBufferEnabled)
-            _velocityBuffer[Time.frameCount % _velocityBuffer.Length] = _lastClimbedVelocity;
-
-        // Apply velocity
-        localPlayer.SetVelocity(_lastClimbedVelocity);
-    }
-
-    #region Climbing Actions
-
-    public void Grab(HandType hand) 
-    {
-        // Reset last velocity
-        _lastClimbedVelocity = Vector3.zero;
-        _lastTransformVelocity = Vector3.zero;
-        _lastTransformPosition = HandTransform.position;
-
-        // Override gravity
-        if (overrideGravity)
-            localPlayer.SetGravityStrength(0f);
-
-        // Send events
-        if (climbing) 
-            SendDroppedEvent(_lastClimbedTransform.gameObject); // previous climbed object
-        SendGrabbedEvent(HandTransform.parent.gameObject); // current climbed object
-
-        climbingHand = hand;
-        climbing = true;
-    }
-
-    public void ForceGrab(Transform tf, HandType hand, Vector3 offset) 
-    {
-        HandTransform.position = tf.position + offset;
-        HandTransform.parent = tf;
-
-        Grab(hand);
-    }
-
-    public void Drop(bool resetVelocity = false) 
-    {
-        if (resetVelocity) 
-        {
-            localPlayer.SetVelocity(Vector3.zero);
-        }
-        else 
-        {
-            // Velocity buffering
-            if (velocityBufferEnabled)
-            {
-                // Get the average of the climbing velocity 
-                // during the last few frames
-                var vel = Vector3.zero;
-                for (int i = 0; i < _velocityBuffer.Length; i++)
+                else if (!value && Climbing && !HasPickupInHand(VRC_Pickup.PickupHand.Right))
                 {
-                    vel += _velocityBuffer[i];
+                    Drop(); // Drop on right click if the player doesn't have a pickup
                 }
-                _lastClimbedVelocity = vel / _velocityBuffer.Length;
+            }
+        }
+
+        #endregion
+
+        #region Climbing
+
+        private void UpdateMaterial()
+        {
+            if (InVR)
+            {
+                // Update from tracked hand position
+                GetHandPos(HandType.RIGHT, out var rightHandPos);
+                GetHandPos(HandType.LEFT, out var leftHandPos);
+
+                _rightHandHighlight = Mathf.Lerp(_rightHandHighlight,
+                    Climbing && ClimbingHand == HandType.RIGHT ? 0f : 0.5f, 0.2f);
+                _leftHandHighlight = Mathf.Lerp(_leftHandHighlight,
+                    Climbing && ClimbingHand == HandType.LEFT ? 0f : 0.5f, 0.2f);
+
+                climbingHighlightMaterial.SetFloat("_RightHandDist",
+                    Climbing && ClimbingHand == HandType.RIGHT ? 0f : handRadius);
+                climbingHighlightMaterial.SetFloat("_LeftHandDist",
+                    Climbing && ClimbingHand == HandType.LEFT ? 0f : handRadius);
+                climbingHighlightMaterial.SetVector("_RightHandPosition",
+                    new Vector4(rightHandPos.x, rightHandPos.y, rightHandPos.z, _rightHandHighlight));
+                climbingHighlightMaterial.SetVector("_LeftHandPosition",
+                    new Vector4(leftHandPos.x, leftHandPos.y, leftHandPos.z, _leftHandHighlight));
+            }
+            else
+            {
+                // Update from raycast
+                GetHeadPos(out var headPos, out var headDir);
+
+                Vector3 targetPos;
+                if (Physics.Raycast(headPos, headDir, out var hit, headReach, climableMask,
+                        QueryTriggerInteraction.Collide))
+                {
+                    targetPos = hit.point;
+                    climbingHighlightMaterial.SetFloat("_RightHandDist",
+                        Climbing && _holdingMouseLeft ? 0f : handRadius);
+                }
+                else
+                {
+                    targetPos = headPos + headDir * headReach;
+                    climbingHighlightMaterial.SetFloat("_RightHandDist", 0f);
+                }
+
+                _rightHandHighlight = Mathf.Lerp(_rightHandHighlight, Climbing && _holdingMouseLeft ? 0f : 0.5f, 0.2f);
+                climbingHighlightMaterial.SetVector("_RightHandPosition",
+                    new Vector4(targetPos.x, targetPos.y, targetPos.z, _rightHandHighlight));
+            }
+        }
+
+        private void UpdateGrab(HandType hand)
+        {
+            Vector3 climbingPos;
+            if (InVR)
+            {
+                GetHandPos(hand, out climbingPos);
+            }
+            else
+            {
+                GetHeadPos(out var headPos, out var headDir);
+
+                if (_holdingMouseLeft) // Update head offset based on mouse direction while left button is pressed
+                    _lastHeadDir = headDir;
+                if (_lastHeadDistance > headDistance) // Smoothly move to the target position
+                    _lastHeadDistance =
+                        Mathf.MoveTowards(_lastHeadDistance, headDistance, headMoveSpeed * Time.deltaTime);
+
+                climbingPos = headPos + _lastHeadDir * _lastHeadDistance;
             }
 
-            // Clamp climbing velocity to something more acceptable,
-            // to avoid people getting flung too far when they get stuck under a ceiling or against a wall.
-            // Transform velocity is not affected, to allow moving objects to fling you far when climbed
-            _lastClimbedVelocity = _lastTransformVelocity + 
-                Vector3.ClampMagnitude(_lastClimbedVelocity - _lastTransformVelocity, maxFlingSpeed) * flingSpeedMultiplier;
-            localPlayer.SetVelocity(_lastClimbedVelocity);
+            // Calculate climbing velocity (total velocity to reach the grabbing point)
+            var climbingOffset = handTransform.position - climbingPos;
+            _lastClimbedVelocity = climbingOffset * (1.0f / Time.deltaTime);
+
+            // Calculate transform velocity (velocity of the object we're grabbing on)
+            var transformOffset = handTransform.position - _lastTransformPosition;
+            _lastTransformVelocity = transformOffset * (1.0f / Time.deltaTime);
+            _lastTransformPosition = handTransform.position;
+
+            // Store velocity in buffer for smoothing on drop
+            if (velocityBufferEnabled)
+                _velocityBuffer[Time.frameCount % _velocityBuffer.Length] = _lastClimbedVelocity;
+
+            // Apply velocity
+            LocalPlayer.SetVelocity(_lastClimbedVelocity);
         }
 
-        // Reset gravity
-        if (overrideGravity)
-            localPlayer.SetGravityStrength(1f);
+        #region Climbing Actions
 
-        // Send events
-        SendDroppedEvent(HandTransform.parent.gameObject);
-
-        climbing = false;
-    }
-
-    public void DropWithBoost(Vector3 boost) 
-    {
-        Drop(false);
-        localPlayer.SetVelocity(_lastClimbedVelocity + boost);
-    }
-
-    public void DropWithTeleport(Vector3 pos) 
-    {
-        Drop(true);
-        localPlayer.TeleportTo(pos, localPlayer.GetRotation(), VRC_SceneDescriptor.SpawnOrientation.Default, true);
-    }
-
-    public void DropGrabbed(Transform tf) 
-    {
-        if (IsGrabbing(tf)) Drop();
-    }
-
-    #endregion
-
-    #region Climbing Tests
-
-    private bool TestGrabVR(HandType hand) 
-    {
-        GetHandPos(hand, out Vector3 handPos);
-
-        if(Physics.OverlapSphereNonAlloc(handPos, handRadius, grabSurfaces, climableMask, QueryTriggerInteraction.Collide) >= 1) 
+        public void Grab(HandType hand)
         {
-            // Store previous transform to send let go events
-            _lastClimbedTransform = HandTransform.parent;
-            // Reparent hand transform to new parent
-            HandTransform.position = handPos; // Don't move hand in VR
-            HandTransform.parent = grabSurfaces[0].transform;
-            return true;
+            // Reset last velocity
+            _lastClimbedVelocity = Vector3.zero;
+            _lastTransformVelocity = Vector3.zero;
+            _lastTransformPosition = handTransform.position;
+
+            // Override gravity
+            if (overrideGravity)
+                LocalPlayer.SetGravityStrength(0f);
+
+            // Send events
+            if (Climbing)
+                SendDroppedEvent(_lastClimbedTransform.gameObject); // previous climbed object
+            SendGrabbedEvent(handTransform.parent.gameObject); // current climbed object
+
+            ClimbingHand = hand;
+            Climbing = true;
         }
-        return false;
-    }
 
-    private bool TestGrabDesktop() 
-    {
-        GetHeadPos(out Vector3 headPos, out Vector3 headDir);
-
-        if (Physics.Raycast(headPos, headDir, out RaycastHit hit, headReach, climableMask, QueryTriggerInteraction.Collide)) 
+        public void ForceGrab(Transform tf, HandType hand, Vector3 offset)
         {
-            // Store previous transform to send let go events
-            _lastClimbedTransform = HandTransform.parent;
-            // Reparent hand transform to new parent
-            HandTransform.position = hit.point;
-            HandTransform.parent = hit.transform;
-            // Store head distance to move smoothly there
-            _lastHeadDistance = Vector3.Distance(headPos, hit.point);
-            return true;
+            handTransform.position = tf.position + offset;
+            handTransform.parent = tf;
+
+            Grab(hand);
         }
-        return false;
-    }
 
-    private bool TestLedgeHelp(out Vector3 teleportPos)
-    {
-        GetHeadPos(out Vector3 headPos, out Vector3 headDir);
-        var handVec = _lastTransformPosition - headPos;
-
-        if (Physics.Raycast(headPos, handVec.normalized, out RaycastHit hit, handVec.magnitude + 1f, ledgeHelpeMask, QueryTriggerInteraction.Ignore)) 
-        {     
-            var facingUp = Vector3.Angle(hit.normal, Vector3.up) < ledgeHelpMaxAngle;
-            // Check if the surface is facing up and there's enough space to teleport the player there
-            // Might have some issues with curved surfaces since we're checking a capsule,
-            // increase the margin or lower the max angle if that happens too often
-            if (facingUp && !Physics.CheckCapsule(
-                hit.point + Vector3.up * (ledgeHelpCapsuleRadius + ledgeHelpCapsuleMargin), 
-                hit.point + Vector3.up * (ledgeHelpCapsuleHeight + ledgeHelpCapsuleRadius + ledgeHelpCapsuleMargin), 
-                ledgeHelpCapsuleRadius - ledgeHelpCapsuleMargin, 
-                ledgeHelpeMask, QueryTriggerInteraction.Ignore)) 
+        public void Drop(bool resetVelocity = false)
+        {
+            if (resetVelocity)
             {
-                teleportPos = hit.point;
+                LocalPlayer.SetVelocity(Vector3.zero);
+            }
+            else
+            {
+                // Velocity buffering
+                if (velocityBufferEnabled)
+                {
+                    // Get the average of the climbing velocity 
+                    // during the last few frames
+                    var vel = Vector3.zero;
+                    for (var i = 0; i < _velocityBuffer.Length; i++) vel += _velocityBuffer[i];
+                    _lastClimbedVelocity = vel / _velocityBuffer.Length;
+                }
+
+                // Clamp climbing velocity to something more acceptable,
+                // to avoid people getting flung too far when they get stuck under a ceiling or against a wall.
+                // Transform velocity is not affected, to allow moving objects to fling you far when climbed
+                _lastClimbedVelocity = _lastTransformVelocity + Vector3.ClampMagnitude(
+                    _lastClimbedVelocity - _lastTransformVelocity, maxFlingSpeed) * flingSpeedMultiplier;
+                LocalPlayer.SetVelocity(_lastClimbedVelocity);
+            }
+
+            // Reset gravity
+            if (overrideGravity)
+                LocalPlayer.SetGravityStrength();
+
+            // Send events
+            SendDroppedEvent(handTransform.parent.gameObject);
+
+            Climbing = false;
+        }
+
+        public void DropWithBoost(Vector3 boost)
+        {
+            Drop();
+            LocalPlayer.SetVelocity(_lastClimbedVelocity + boost);
+        }
+
+        public void DropWithTeleport(Vector3 pos)
+        {
+            Drop(true);
+            LocalPlayer.TeleportTo(pos, LocalPlayer.GetRotation(), VRC_SceneDescriptor.SpawnOrientation.Default, true);
+        }
+
+        public void DropGrabbed(Transform tf)
+        {
+            if (IsGrabbing(tf)) Drop();
+        }
+
+        #endregion
+
+        #region Climbing Tests
+
+        private bool TestGrabVR(HandType hand)
+        {
+            GetHandPos(hand, out var handPos);
+
+            if (Physics.OverlapSphereNonAlloc(handPos, handRadius, _grabSurfaces, climableMask,
+                    QueryTriggerInteraction.Collide) >= 1)
+            {
+                // Store previous transform to send let go events
+                _lastClimbedTransform = handTransform.parent;
+                // Reparent hand transform to new parent
+                handTransform.position = handPos; // Don't move hand in VR
+                handTransform.parent = _grabSurfaces[0].transform;
                 return true;
             }
+
+            return false;
         }
-        teleportPos = Vector3.zero;
-        return false;
-    }
 
-    #endregion
-
-    #region Climbing Events
-
-    private void SendGrabbedEvent(GameObject climbed_object) 
-    {
-        if (_sendEventsToClimbedObjects) 
+        private bool TestGrabDesktop()
         {
-            UdonBehaviour behavior = (UdonBehaviour)climbed_object.GetComponent(typeof(UdonBehaviour));
-            if (behavior) 
-                behavior.SendCustomEvent(_grabbedEvent);
+            GetHeadPos(out var headPos, out var headDir);
+
+            if (Physics.Raycast(headPos, headDir, out var hit, headReach, climableMask,
+                    QueryTriggerInteraction.Collide))
+            {
+                // Store previous transform to send let go events
+                _lastClimbedTransform = handTransform.parent;
+                // Reparent hand transform to new parent
+                handTransform.position = hit.point;
+                handTransform.parent = hit.transform;
+                // Store head distance to move smoothly there
+                _lastHeadDistance = Vector3.Distance(headPos, hit.point);
+                return true;
+            }
+
+            return false;
         }
-        foreach (UdonBehaviour target in _eventTargets)
+
+        private bool TestLedgeHelp(out Vector3 teleportPos)
         {
-            target.SendCustomEvent(_grabbedEvent);
+            GetHeadPos(out var headPos, out var headDir);
+            var handVec = _lastTransformPosition - headPos;
+
+            if (Physics.Raycast(headPos, handVec.normalized, out var hit, handVec.magnitude + 1f, ledgeHelpMask,
+                    QueryTriggerInteraction.Ignore))
+            {
+                var facingUp = Vector3.Angle(hit.normal, Vector3.up) < ledgeHelpMaxAngle;
+                // Check if the surface is facing up and there's enough space to teleport the player there
+                // Might have some issues with curved surfaces since we're checking a capsule,
+                // increase the margin or lower the max angle if that happens too often
+                if (facingUp && !Physics.CheckCapsule(
+                        hit.point + Vector3.up * (ledgeHelpCapsuleRadius + ledgeHelpCapsuleMargin),
+                        hit.point + Vector3.up *
+                        (ledgeHelpCapsuleHeight + ledgeHelpCapsuleRadius + ledgeHelpCapsuleMargin),
+                        ledgeHelpCapsuleRadius - ledgeHelpCapsuleMargin,
+                        ledgeHelpMask, QueryTriggerInteraction.Ignore))
+                {
+                    teleportPos = hit.point;
+                    return true;
+                }
+            }
+
+            teleportPos = Vector3.zero;
+            return false;
         }
 
-    }
+        #endregion
 
-    private void SendDroppedEvent(GameObject climbed_object) 
-    {
-        if (_sendEventsToClimbedObjects) 
+        #region Climbing Events
+
+        private void SendGrabbedEvent(GameObject climbed_object)
         {
-            UdonBehaviour behavior = (UdonBehaviour)climbed_object.GetComponent(typeof(UdonBehaviour));
-            if (behavior) 
-                behavior.SendCustomEvent(_droppedEvent);
+            if (sendEventsToClimbedObjects)
+            {
+                var behavior = (UdonBehaviour)climbed_object.GetComponent(typeof(UdonBehaviour));
+                if (behavior)
+                    behavior.SendCustomEvent(grabbedEventName);
+            }
+
+            foreach (var target in eventTargets) target.SendCustomEvent(grabbedEventName);
         }
-        foreach (UdonBehaviour target in _eventTargets)
+
+        private void SendDroppedEvent(GameObject climbed_object)
         {
-            target.SendCustomEvent(_droppedEvent);
+            if (sendEventsToClimbedObjects)
+            {
+                var behavior = (UdonBehaviour)climbed_object.GetComponent(typeof(UdonBehaviour));
+                if (behavior)
+                    behavior.SendCustomEvent(droppedEventName);
+            }
+
+            foreach (var target in eventTargets) target.SendCustomEvent(droppedEventName);
         }
+
+        #endregion
+
+        #region Climbing Utilities
+
+        public bool IsGrabbing(Transform tf)
+        {
+            if (Climbing)
+                return handTransform.parent == tf;
+            return false;
+        }
+
+        public bool HasPickupInHand(VRC_Pickup.PickupHand hand)
+        {
+            return LocalPlayer.GetPickupInHand(hand) != null;
+        }
+
+        public bool IsClimbingWithHand(HandType hand)
+        {
+            return Climbing && ClimbingHand == hand;
+        }
+
+        private void GetHandPos(HandType hand, out Vector3 hand_pos)
+        {
+            var handTrackingData = hand == HandType.LEFT
+                ? LocalPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.LeftHand)
+                : LocalPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.RightHand);
+            hand_pos = handTrackingData.position;
+        }
+
+        private void GetHeadPos(out Vector3 head_pos, out Vector3 head_dir)
+        {
+            var headTrackingData = LocalPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
+            head_pos = headTrackingData.position;
+            head_dir = headTrackingData.rotation * Vector3.forward;
+        }
+
+        #endregion
+
+        #endregion
     }
-
-    #endregion
-
-    #region Climbing Utilities
-
-    public bool IsGrabbing(Transform tf) 
-    {
-        if (climbing) 
-            return HandTransform.parent == tf;
-        return false;
-    }
-    
-    public bool HasPickupInHand(VRC_Pickup.PickupHand hand) 
-    {
-        return localPlayer.GetPickupInHand(hand) != null;
-    }
-    
-    public bool IsClimbingWithHand(HandType hand) 
-    {
-        return climbing && climbingHand == hand;
-    }
-
-    private void GetHandPos(HandType hand, out Vector3 hand_pos) 
-    {
-        VRCPlayerApi.TrackingData handTrackingData = hand == HandType.LEFT ? localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.LeftHand) : localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.RightHand);
-        hand_pos = handTrackingData.position;
-    }
-
-    private void GetHeadPos(out Vector3 head_pos, out Vector3 head_dir) 
-    {
-         VRCPlayerApi.TrackingData headTrackingData = localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
-         head_pos = headTrackingData.position;
-         head_dir = headTrackingData.rotation * Vector3.forward;
-    }
-
-    #endregion
-
-    #endregion
 }
-

@@ -56,29 +56,35 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   _udonSharpBackingUdonBehaviour: {fileID: 6207670217296417743}
-  HandTransform: {fileID: 6207670217678565075}
+  handTransform: {fileID: 6207670217678565075}
   climableMask:
     serializedVersion: 2
     m_Bits: 8388608
-  climbingHighlightMaterial: {fileID: 0}
-  walljumpEnabled: 1
-  walljumpSpeed: 5
+  climbingHighlightMaterial: {fileID: 2100000, guid: dd4a02b83594bbc44823a0e380db91bd,
+    type: 2}
+  wallJumpEnabled: 1
+  wallJumpSpeed: 5
+  overrideGravity: 1
   velocityBufferEnabled: 1
   ledgeHelpEnabled: 1
-  ledgeHelpeMask:
+  ledgeHelpMask:
     serializedVersion: 2
     m_Bits: 8388609
-  useGrabButton: 1
+  ledgeHelpMaxAngle: 35
+  ledgeHelpCapsuleHeight: 2
+  ledgeHelpCapsuleRadius: 0.1
+  ledgeHelpCapsuleMargin: 0.01
+  useGripButtons: 1
   handRadius: 0.1
   maxFlingSpeed: 6
   flingSpeedMultiplier: 1.2
   headReach: 2
   headDistance: 0.5
   headMoveSpeed: 5
-  _sendEventsToClimbedObjects: 1
-  _eventTargets: []
-  _grabbedEvent: ClimbingGrabbed
-  _droppedEvent: ClimbingDropped
+  sendEventsToClimbedObjects: 1
+  eventTargets: []
+  grabbedEventName: ClimbingGrabbed
+  droppedEventName: ClimbingDropped
 --- !u!114 &6207670217296417743
 MonoBehaviour:
   m_ObjectHideFlags: 0
